@@ -29,14 +29,21 @@ Bash-скрипт для автоматического обновления `ge
 
 ## Установка
 
-1. Скопируйте скрипт на сервер:
+1. Скачайте репозиторий:
+
+```bash
+git clone https://github.com/s-bug0ff/remna-geofile-updator.git
+cd remna-geofile-updator
+```
+
+2. Скопируйте скрипт на сервер:
 
 ```bash
 sudo cp remna-geo-updater.sh /usr/local/bin/remna-geo-updater.sh
 sudo chmod +x /usr/local/bin/remna-geo-updater.sh
 ```
 
-2. Проверьте безопасно в dry-run:
+3. Проверьте безопасно в dry-run:
 
 ```bash
 sudo /usr/local/bin/remna-geo-updater.sh --dry-run
@@ -101,6 +108,10 @@ sudo /usr/local/bin/remna-geo-updater.sh --all
 - `LOCK_PATH` (default: `/var/lock/remna-geo-updater.lock`)
 - `STATE_DIR` (default: `/var/lib/remna-geo-updater`)
 - `CRON_LOG_FILE` (default: `/var/log/remna-geo-updater.log`)
+- `RESTART_RETRIES` (default: `8`)
+- `RESTART_RETRY_DELAY` (default: `15`)
+- `RESTART_WAIT_TIMEOUT` (default: `180`)
+- `ORIGINAL_BACKUP_SUFFIX` (default: `.original.bak`)
 - `GEOIP_URL`, `GEOSITE_URL`, `GEOIP_NAME`, `GEOSITE_NAME`
 
 Пример:
@@ -113,7 +124,23 @@ sudo COMPOSE_FILE=/opt/remnawave/docker-compose.yml SERVICE_NAME=remnanode /usr/
 
 - Лог cron: `/var/log/remna-geo-updater.log`
 - Маркер успешного ежедневного запуска: `/var/lib/remna-geo-updater/last-success-moscow-date`
-- Backup compose при изменениях: `docker-compose.*.bak.<timestamp>`
+- Одноразовый backup оригинального compose (до первого изменения): `docker-compose.yml.original.bak` (или `.yaml.original.bak`)
+- Backup compose при каждом изменении: `docker-compose.*.bak.<timestamp>`
+
+## Совместимость с watchtower
+
+Если на хосте работает watchtower, скрипт учитывает это:
+
+- перед `restart` проверяет, не находится ли контейнер в состоянии `restarting`;
+- при конфликте с параллельным перезапуском делает ретраи `restart`;
+- если `restart` неуспешен, делает ретраи `up -d`;
+- все тайминги настраиваются через `RESTART_RETRIES`, `RESTART_RETRY_DELAY`, `RESTART_WAIT_TIMEOUT`.
+
+Пример для более "мягкого" поведения на занятых хостах:
+
+```bash
+sudo RESTART_RETRIES=12 RESTART_RETRY_DELAY=20 RESTART_WAIT_TIMEOUT=300 /usr/local/bin/remna-geo-updater.sh --run
+```
 
 ## Проверка после установки
 

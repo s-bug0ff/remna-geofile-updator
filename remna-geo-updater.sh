@@ -14,6 +14,10 @@ LOCK_PATH="${LOCK_PATH:-/var/lock/remna-geo-updater.lock}"
 STATE_DIR="${STATE_DIR:-/var/lib/remna-geo-updater}"
 CRON_LOG_FILE="${CRON_LOG_FILE:-/var/log/remna-geo-updater.log}"
 COMPOSE_FILE_OVERRIDE="${COMPOSE_FILE:-}"
+RESTART_RETRIES="${RESTART_RETRIES:-8}"
+RESTART_RETRY_DELAY="${RESTART_RETRY_DELAY:-15}"
+RESTART_WAIT_TIMEOUT="${RESTART_WAIT_TIMEOUT:-180}"
+ORIGINAL_BACKUP_SUFFIX="${ORIGINAL_BACKUP_SUFFIX:-.original.bak}"
 
 COMPOSE_CANDIDATES=(
   "/opt/remnanode/docker-compose.yml"
@@ -111,6 +115,16 @@ backup_file() {
   local dst="${src}.bak.$(date +%Y%m%d%H%M%S)"
   cp "${src}" "${dst}"
   LAST_COMPOSE_BACKUP="${dst}"
+}
+
+ensure_original_backup_file() {
+  local src="$1"
+  local dst="${src}${ORIGINAL_BACKUP_SUFFIX}"
+  if [[ -f "${dst}" ]]; then
+    return 0
+  fi
+  cp "${src}" "${dst}"
+  log "Создан backup оригинала compose: ${dst}"
 }
 
 hash_file() {
@@ -293,6 +307,7 @@ ensure_volumes_in_compose() {
       log "DRY-RUN: в ${compose_file} будут добавлены недостающие volumes."
       return 0
     fi
+    ensure_original_backup_file "${compose_file}"
     backup_file "${compose_file}"
     mv "${tmp_file}" "${compose_file}"
     log "Обновлен compose: ${compose_file}"
@@ -342,12 +357,56 @@ download_geo_files() {
 
 restart_service() {
   local compose_file="$1"
+  local attempt
+  local cid
+  local status
+  local waited
 
-  log "Перезапускаю контейнер ${SERVICE_NAME}"
-  if ! "${DOCKER_COMPOSE_CMD[@]}" -f "${compose_file}" restart "${SERVICE_NAME}"; then
-    log "restart не удался, пробую up -d ${SERVICE_NAME}"
-    "${DOCKER_COMPOSE_CMD[@]}" -f "${compose_file}" up -d "${SERVICE_NAME}"
-  fi
+  attempt=1
+  while [[ "${attempt}" -le "${RESTART_RETRIES}" ]]; do
+    cid="$("${DOCKER_COMPOSE_CMD[@]}" -f "${compose_file}" ps -q "${SERVICE_NAME}" 2>/dev/null || true)"
+    waited=0
+
+    # Если watchtower уже перезапускает контейнер, ждем стабильного состояния.
+    while [[ -n "${cid}" ]]; do
+      status="$(docker inspect --format '{{.State.Status}}' "${cid}" 2>/dev/null || true)"
+      if [[ "${status}" != "restarting" ]]; then
+        break
+      fi
+
+      if [[ "${waited}" -ge "${RESTART_WAIT_TIMEOUT}" ]]; then
+        log "Контейнер ${SERVICE_NAME} долго в restarting (watchtower?), продолжаю с ретраем."
+        break
+      fi
+
+      log "Контейнер ${SERVICE_NAME} в restarting, жду ${RESTART_RETRY_DELAY}с (попытка ${attempt}/${RESTART_RETRIES})"
+      sleep "${RESTART_RETRY_DELAY}"
+      waited=$((waited + RESTART_RETRY_DELAY))
+      cid="$("${DOCKER_COMPOSE_CMD[@]}" -f "${compose_file}" ps -q "${SERVICE_NAME}" 2>/dev/null || true)"
+    done
+
+    log "Перезапускаю контейнер ${SERVICE_NAME} (попытка ${attempt}/${RESTART_RETRIES})"
+    if "${DOCKER_COMPOSE_CMD[@]}" -f "${compose_file}" restart "${SERVICE_NAME}"; then
+      return 0
+    fi
+
+    log "restart не удался (возможен конфликт с watchtower), жду ${RESTART_RETRY_DELAY}с"
+    sleep "${RESTART_RETRY_DELAY}"
+    attempt=$((attempt + 1))
+  done
+
+  attempt=1
+  while [[ "${attempt}" -le "${RESTART_RETRIES}" ]]; do
+    log "Пробую up -d ${SERVICE_NAME} (попытка ${attempt}/${RESTART_RETRIES})"
+    if "${DOCKER_COMPOSE_CMD[@]}" -f "${compose_file}" up -d "${SERVICE_NAME}"; then
+      return 0
+    fi
+    log "up -d не удался, жду ${RESTART_RETRY_DELAY}с"
+    sleep "${RESTART_RETRY_DELAY}"
+    attempt=$((attempt + 1))
+  done
+
+  die "Не удалось перезапустить ${SERVICE_NAME} после ${RESTART_RETRIES} попыток (возможен конфликт с watchtower)."
 }
 
 moscow_date() {
@@ -392,6 +451,7 @@ run_once() {
   require_root
   require_cmd curl
   require_cmd awk
+  require_cmd docker
 
   mkdir -p "${STATE_DIR}"
   acquire_lock
@@ -511,6 +571,9 @@ usage() {
   SHARE_DIR      (default: /opt/remnawave/xray/share)
   COMPOSE_FILE   (явный путь к compose, если авто-детект не подходит)
   SCRIPT_PATH    (default: /usr/local/bin/remna-geo-updater.sh)
+  RESTART_RETRIES      (default: 8)
+  RESTART_RETRY_DELAY  (default: 15)
+  RESTART_WAIT_TIMEOUT (default: 180)
 EOF
 }
 
