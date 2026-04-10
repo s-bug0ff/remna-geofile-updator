@@ -29,18 +29,17 @@ Bash-скрипт для автоматического обновления `ge
 
 ## Установка
 
-1. Скачайте репозиторий:
+1. Скачайте скрипт:
 
 ```bash
-git clone https://github.com/s-bug0ff/remna-geofile-updator.git
-cd remna-geofile-updator
+sudo curl -fL "https://raw.githubusercontent.com/s-bug0ff/remna-geofile-updator/refs/heads/main/remna-geo-updater.sh" -o /usr/local/bin/remna-geo-updater.sh
+sudo chmod +x /usr/local/bin/remna-geo-updater.sh
 ```
 
-2. Скопируйте скрипт на сервер:
+2. (Опционально) Проверьте, что файл на месте:
 
 ```bash
-sudo cp remna-geo-updater.sh /usr/local/bin/remna-geo-updater.sh
-sudo chmod +x /usr/local/bin/remna-geo-updater.sh
+ls -l /usr/local/bin/remna-geo-updater.sh
 ```
 
 3. Проверьте безопасно в dry-run:
