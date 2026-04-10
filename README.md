@@ -133,6 +133,7 @@ sudo COMPOSE_FILE=/opt/remnawave/docker-compose.yml SERVICE_NAME=remnanode /usr/
 - перед `restart` проверяет, не находится ли контейнер в состоянии `restarting`;
 - при конфликте с параллельным перезапуском делает ретраи `restart`;
 - если `restart` неуспешен, делает ретраи `up -d`;
+- если изменился compose (например добавлены volumes), выполняет `up -d --force-recreate --no-deps`, чтобы новые mounts точно применились;
 - все тайминги настраиваются через `RESTART_RETRIES`, `RESTART_RETRY_DELAY`, `RESTART_WAIT_TIMEOUT`.
 
 Пример для более "мягкого" поведения на занятых хостах:

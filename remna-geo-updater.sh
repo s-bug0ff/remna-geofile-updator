@@ -409,6 +409,24 @@ restart_service() {
   die "Не удалось перезапустить ${SERVICE_NAME} после ${RESTART_RETRIES} попыток (возможен конфликт с watchtower)."
 }
 
+recreate_service() {
+  local compose_file="$1"
+  local attempt=1
+
+  while [[ "${attempt}" -le "${RESTART_RETRIES}" ]]; do
+    log "Пересоздаю ${SERVICE_NAME} для применения нового compose (попытка ${attempt}/${RESTART_RETRIES})"
+    if "${DOCKER_COMPOSE_CMD[@]}" -f "${compose_file}" up -d --no-deps --force-recreate "${SERVICE_NAME}"; then
+      return 0
+    fi
+
+    log "Не удалось пересоздать ${SERVICE_NAME}, жду ${RESTART_RETRY_DELAY}с"
+    sleep "${RESTART_RETRY_DELAY}"
+    attempt=$((attempt + 1))
+  done
+
+  die "Не удалось пересоздать ${SERVICE_NAME} после ${RESTART_RETRIES} попыток."
+}
+
 moscow_date() {
   if TZ=Europe/Moscow date +%F >/dev/null 2>&1; then
     TZ=Europe/Moscow date +%F
@@ -484,8 +502,10 @@ run_once() {
     return 0
   fi
 
-  # Перезапускаем только если есть реальные изменения.
-  if [[ ${compose_changed} -eq 0 || ${files_changed} -eq 0 ]]; then
+  # Если меняли compose, нужен recreate (restart не применяет новые volumes).
+  if [[ ${compose_changed} -eq 0 ]]; then
+    recreate_service "${compose_file}"
+  elif [[ ${files_changed} -eq 0 ]]; then
     restart_service "${compose_file}"
   else
     log "Изменений нет, перезапуск не требуется."
